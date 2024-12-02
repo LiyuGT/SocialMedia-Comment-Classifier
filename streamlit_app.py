@@ -1,113 +1,130 @@
 import streamlit as st
 from openai import OpenAI
+from PIL import Image
+import io
 
-
-# Define a function to classify comments based on a specific category
+# Define the classify_comment function before calling it
 def classify_comment(comment, category, client):
-   if category.lower() == "general":
-       prompt = (
-           f"As a TikTok comment classifier, classify the comment as 'good' or 'bad'.\n\n"
-           f"Comment: '{comment}'\n\n"
-           "Classification and Reason:"
-       )
-   else:
-       prompt = (
-           f"As a TikTok comment classifier, classify comments as 'good' or 'bad' specifically in relation to '{category}'. "
-           f"Also, indicate explicitly if the comment is relevant to '{category}' or not.\n\n"
-           f"Comment: '{comment}'\n\n"
-           "Classification and Reason:\n"
-           "Is this comment related to the category? (Yes/No):"
-       )
+    if not client:
+        return "No client initialized", False, False
+    
+    prompt = (
+        f"As a TikTok comment classifier, classify the comment as 'good' or 'bad' "
+        f"specifically in relation to '{category}'. "
+        f"Comment: '{comment}'\n\n"
+        "Classification and Reason:\n"
+        "Is this comment related to the category? (Yes/No):"
+    )
+
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+    )
+
+    classification_and_reason = response.choices[0].message.content.strip()
+    is_bad = "bad" in classification_and_reason.lower()
+    related_to_category = "yes" in classification_and_reason.lower().split("is this comment related to the category?")[-1].strip()
+    
+    return classification_and_reason, is_bad, related_to_category
+
+# Initialize session state variables
+if "archive_mode" not in st.session_state:
+    st.session_state["archive_mode"] = "Keep ALL Comments"
+
+if "custom_category" not in st.session_state:
+    st.session_state["custom_category"] = "none"
+
+if "uploaded_image" not in st.session_state:
+    st.session_state["uploaded_image"] = None
+
+def main_page(client):
+    st.title("📸 KLS Media Post")
+    
+    uploaded_image = st.file_uploader("Choose an image", type=["jpg", "png", "jpeg"])
+
+    # Save the uploaded image to session state
+    if uploaded_image:
+        st.session_state["uploaded_image"] = uploaded_image
+    
+    # Display the uploaded image if it exists in session state
+    if st.session_state["uploaded_image"]:
+        image_bytes = st.session_state["uploaded_image"].getvalue()
+        image = Image.open(io.BytesIO(image_bytes))
+        st.image(image, caption="Uploaded Social Media Post")
+        
+        st.write(f"Current Archiving Mode: {st.session_state['archive_mode']}")
+        if st.session_state["archive_mode"] == "Customize":
+            st.write(f"Current Archiving Category: {st.session_state['custom_category']}")
+        # Hardcoded comments
+        comments = ["Great post!", "Your makeup looks terrible.", "Amazing style!", "You are not in good body shape."]
+        
+        # User input for custom comments
+        custom_comment = st.text_input("Add Comment...")
+        if custom_comment:
+            comments.append(custom_comment)
+        
+        for comment in comments:
+            if client:
+                if st.session_state["archive_mode"] == "Customize":
+                    category = st.session_state["custom_category"]
+                    classification, is_bad, related = classify_comment(comment, category, client)
+                    if is_bad and related:
+                        st.error(f"🚫 Comment Archived: {comment}")
+                    else:
+                        st.success(f"✅ Comment Kept: {comment}")
+                
+                elif st.session_state["archive_mode"] == "Archive ALL bad comments":
+                    classification, is_bad, _ = classify_comment(comment, "general", client)
+                    if is_bad:
+                        st.error(f"🚫 Comment Archived: {comment}")
+                    else:
+                        st.success(f"✅ Comment Kept: {comment}")
+                
+                elif st.session_state["archive_mode"] == "Keep ALL Comments":
+                    st.success(f"✅ Comment Kept: {comment}")
+
+            else:
+                st.warning("No OpenAI client available.")
 
 
+def settings_page():
+    st.title("⚙️ KLS Media Settings")
+    st.write("Modify your KLS app settings here.")
+    
+    archive_mode = st.radio(
+        "Select your archiving preference:",
+        ["Archive ALL bad comments", "Keep ALL Comments", "Customize"],
+        index=["Archive ALL bad comments", "Keep ALL Comments", "Customize"].index(st.session_state["archive_mode"]),
+    )
+    
+    st.session_state["archive_mode"] = archive_mode
+    
+    if archive_mode == "Customize":
+        category = st.selectbox(
+            "Select the type of comments to archive:",
+            options=["Body", "Makeup", "Personality", "Fashion", "Performance"],
+        ).lower()
+        st.session_state["custom_category"] = category
+    
+    st.write(f"Current selection: {st.session_state['archive_mode']}")
+    if archive_mode == "Customize":
+        st.write(f"Custom Category: {st.session_state['custom_category']}")
+    st.info("Return to the post feed page to see how settings are applied.")
 
+# Page navigation using sidebar
+page = st.sidebar.selectbox("Navigate", ["Post Feeds", "Settings"])
 
-   response = client.chat.completions.create(
-       model="gpt-3.5-turbo",
-       messages=[
-           {"role": "user", "content": prompt}
-       ],
-       temperature=0.2
-   )
+# OpenAI API Key Section
+openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+client = None
+if openai_api_key:
+    try:
+        client = OpenAI(api_key=openai_api_key)
+    except Exception as e:
+        st.sidebar.error(f"Error initializing OpenAI client: {e}")
 
-
-   # Extract the response
-   classification_and_reason = response.choices[0].message.content.strip()
-
-
-   # Determine if the comment is bad and related to the selected category
-   is_bad = "bad" in classification_and_reason.lower()
-   #related_to_category = "yes" in classification_and_reason.lower().split("is this comment related to the category?")[-1].strip()
-   if category.lower() == "general":
-       related_to_category = True
-   else:
-       related_to_category = "yes" in classification_and_reason.lower().split("is this comment related to the category?")[-1].strip()
-
-
-   return classification_and_reason, is_bad, related_to_category
-
-
-# Streamlit app title and description
-st.title("💬 Social Media Comment Classifier")
-st.write(
-   "This is a Comment Classifier Feature on Social media that allows you to archive bad comments "
-   "based on a specific category (e.g., body, makeup, personality). "
-   "To use this feature, you need an OpenAI API key."
-)
-
-
-# OpenAI API key input
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-   st.info("Please enter your OpenAI API key to use the app.", icon="🗝️")
-else:
-   client = OpenAI(api_key=openai_api_key)
-
-
-   # Prompt for user to select archiving mode
-   archive_mode = st.radio(
-       "Select your archiving preference:",
-       ["Archive ALL bad comments", "Keep ALL Comments", "Customize"]
-   )
-
-
-   if archive_mode == "Keep ALL Comments":
-       comment = st.text_input("Enter a comment:")
-       if st.button("Submit Comment"):
-           if comment:
-               st.success("✅ Comment Kept!")
-          
-   elif archive_mode == "Archive ALL bad comments":
-       comment = st.text_input("Enter a comment:")
-       if st.button("Submit Comment"):
-           if comment:
-               with st.spinner("Checking comment..."):
-                   result, is_bad, _ = classify_comment(comment, "general", client)
-                   if is_bad:
-                       st.error("🚫 Comment Archived!")
-                   else:
-                       st.success("✅ Comment Kept!")
-               
-                   #st.write(result)
-
-
-   elif archive_mode == "Customize":
-       category = st.selectbox(
-           "Select the type of comments to archive:",
-           options=["Body", "Makeup", "Personality", "Fashion", "Performance"],
-       ).lower()
-
-
-       comment = st.text_input("Enter a comment:")
-       if st.button("Submit Comment"):
-           if comment:
-               with st.spinner("Checking comment..."):
-                   result, is_bad, related_to_category = classify_comment(comment, category, client)
-                   if is_bad and related_to_category:
-                       st.error("🚫 Comment Archived!")
-                   else:
-                       st.success("✅ Comment Kept!")
-                   #st.write(related_to_category)
-                   #st.write(result)
-
-
+if page == "Post Feeds":
+    main_page(client)
+elif page == "Settings":
+    settings_page()
